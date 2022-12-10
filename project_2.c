@@ -63,6 +63,7 @@ pthread_mutex_t taskIDMutex;
 pthread_mutex_t packageMutex;
 pthread_mutex_t deliveryMutex;
 pthread_mutex_t paintMutex;
+pthread_mutex_t assambleMutex;
 
 int keepGoing = 1;
 
@@ -95,6 +96,8 @@ int main(int argc, char **argv)
 
     packageQueue = ConstructQueue(1000);
     deliveryQueue = ConstructQueue(1000);
+    paintQueue = ConstructQueue(1000);
+    assambleQueue = ConstructQueue(1000);
 
     struct thread_data data;
     data.sum = 5;
@@ -172,7 +175,8 @@ int main(int argc, char **argv)
     pthread_mutex_destroy(&packageMutex);
     pthread_mutex_destroy(&deliveryMutex);
     pthread_mutex_destroy(&taskIDMutex);
-     pthread_mutex_destroy(&paintMutex);
+    pthread_mutex_destroy(&paintMutex);
+    pthread_mutex_destroy(&assambleMutex);
     return 0;
 }
 
@@ -214,14 +218,35 @@ void *ElfA(void *arg)
             Enqueue(deliveryQueue, a);
             pthread_mutex_unlock(&deliveryMutex);
         }
-
-        // while (paintQueue->size != 0)
-        // {
-        //     pthread_mutex_lock(&paintMutex);
-        //     Task a = Dequeue(paintQueue);
-        //     pthread_mutex_unlock(&paintMutex);
-        // }
         pthread_mutex_unlock(&packageMutex);
+
+
+        while (paintQueue->size != 0)
+        {
+            pthread_mutex_lock(&paintMutex);
+            Task a = Dequeue(paintQueue);
+            pthread_mutex_unlock(&paintMutex);
+            pthread_sleep(3);
+
+            gettimeofday(&currentTime, NULL);
+            a.turnAround = currentTime.tv_sec - a.taskArrival;
+
+            fprintf(simulationResult,
+                    "%d             %d          %d              %c           %d         %d         %d              %c\n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'A');
+
+            // deliver to package
+            a.ID = taskID;
+            pthread_mutex_lock(&taskIDMutex);
+            taskID++;
+            pthread_mutex_unlock(&taskIDMutex);
+
+            a.type = 'C';
+            gettimeofday(&currentTime, NULL);
+            a.taskArrival = currentTime.tv_sec;
+            pthread_mutex_lock(&packageMutex);
+            Enqueue(packageQueue, a);
+            pthread_mutex_unlock(&packageMutex);
+        }
     }
     pthread_exit(0);
 }
@@ -266,6 +291,33 @@ void *ElfB(void *arg)
         }
         
         pthread_mutex_unlock(&packageMutex);
+
+        while (assambleQueue->size != 0)
+        {
+            pthread_mutex_lock(&assambleMutex);
+            Task a = Dequeue(assambleQueue);
+            pthread_mutex_unlock(&assambleMutex);
+            pthread_sleep(2);
+
+            gettimeofday(&currentTime, NULL);
+            a.turnAround = currentTime.tv_sec - a.taskArrival;
+
+            fprintf(simulationResult,
+                    "%d             %d          %d              %c           %d         %d         %d              %c\n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'B');
+
+            // deliver to package
+            a.ID = taskID;
+            pthread_mutex_lock(&taskIDMutex);
+            taskID++;
+            pthread_mutex_unlock(&taskIDMutex);
+
+            a.type = 'C';
+            gettimeofday(&currentTime, NULL);
+            a.taskArrival = currentTime.tv_sec;
+            pthread_mutex_lock(&packageMutex);
+            Enqueue(packageQueue, a);
+            pthread_mutex_unlock(&packageMutex);
+        }
     }
     pthread_exit(0);
 }
@@ -357,24 +409,42 @@ void *ControlThread(void *arg)
 
             printf("Size: %d\n", packageQueue->size);
         }
-        // else if (ran1 == 5 || ran1 == 6)
-        // {
-        //     Task t;
-        //     t.ID = taskID;
-        //     pthread_mutex_lock(&taskIDMutex);
-        //     taskID++;
-        //     pthread_mutex_unlock(&taskIDMutex);
-        //     t.type = 'P';
-        //     t.giftID = giftID;
-        //     giftID++;
-        //     t.giftType = 2;
-        //     gettimeofday(&currentTime, NULL);
-        //     t.requestTime = currentTime.tv_sec;
-        //     t.taskArrival = currentTime.tv_sec;
-        //     pthread_mutex_lock(&paintMutex);
-        //     Enqueue(paintQueue, t);
-        //     pthread_mutex_unlock(&paintMutex);
-        // }
+        else if (ran1 == 5 || ran1 == 6)
+        {
+            Task t;
+            t.ID = taskID;
+            pthread_mutex_lock(&taskIDMutex);
+            taskID++;
+            pthread_mutex_unlock(&taskIDMutex);
+            t.type = 'P';
+            t.giftID = giftID;
+            giftID++;
+            t.giftType = 2;
+            gettimeofday(&currentTime, NULL);
+            t.requestTime = currentTime.tv_sec;
+            t.taskArrival = currentTime.tv_sec;
+            pthread_mutex_lock(&paintMutex);
+            Enqueue(paintQueue, t);
+            pthread_mutex_unlock(&paintMutex);
+        }
+        else if (ran1 == 7 || ran1 == 8)
+        {
+            Task t;
+            t.ID = taskID;
+            pthread_mutex_lock(&taskIDMutex);
+            taskID++;
+            pthread_mutex_unlock(&taskIDMutex);
+            t.type = 'A';
+            t.giftID = giftID;
+            giftID++;
+            t.giftType = 3;
+            gettimeofday(&currentTime, NULL);
+            t.requestTime = currentTime.tv_sec;
+            t.taskArrival = currentTime.tv_sec;
+            pthread_mutex_lock(&assambleMutex);
+            Enqueue(assambleQueue, t);
+            pthread_mutex_unlock(&assambleMutex);
+        }
 
         // // // your code goes here
         // // // you can simulate gift request creation in here,
