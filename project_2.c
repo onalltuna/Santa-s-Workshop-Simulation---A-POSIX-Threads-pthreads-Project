@@ -49,6 +49,8 @@ struct thread_data
    char *message;
 };
 
+ int taskID = 1;
+
 // Queues
  Queue *packageQueue;
  Queue *deliveryQueue;
@@ -57,6 +59,7 @@ struct thread_data
  Queue *qAQueue;
 
  //mutexes
+ pthread_mutex_t taskIDMutex;
  pthread_mutex_t packageMutex;
  pthread_mutex_t deliveryMutex;
 
@@ -73,7 +76,7 @@ int main(int argc,char **argv){
         else if(!strcmp(argv[i], "-s"))  {seed = atoi(argv[++i]);}
     }
 
-    if (pthread_mutex_init(&packageMutex, NULL))   { 
+    if (pthread_mutex_init(&packageMutex, NULL) && pthread_mutex_init(&deliveryMutex, NULL) && pthread_mutex_init(&taskIDMutex, NULL))   { 
         printf("\nInitiliazing mutex error.\n"); 
         return 1; 
    } 
@@ -85,43 +88,23 @@ int main(int argc,char **argv){
     struct thread_data data;
     data.sum = 5;
 
-    pthread_t threads[2];
+    pthread_t threads[4];
     int rc;
     // long t;
-    rc = pthread_create(&threads[0], NULL, ElfA,NULL);
-    if (rc) {
-        printf("HERE\n");
+    rc = pthread_create(&threads[0], NULL, ControlThread, NULL);
+    rc = pthread_create(&threads[1], NULL, ElfA,NULL);
+    rc = pthread_create(&threads[2], NULL, ElfB, NULL);
+    rc = pthread_create(&threads[3], NULL, Santa, NULL);
+    // if (rc) {
+    //     printf("HERE\n");
 
-         exit(-1);
-      }
-    // rc = pthread_create(&threads[1], NULL, *(ElfB), NULL);
-    // rc = pthread_create(&threads[2], NULL, *(Santa), NULL);
-    rc = pthread_create(&threads[1], NULL, ControlThread, NULL);
-    if (rc) {
-        printf("HERE\n");
+    //      exit(-1);
+    //   }
+    // if (rc) {
+    //     printf("HERE\n");
 
-         exit(-1);
-      }
-
-    // Current and finish time to hold the total execution time
-//     struct timeval currentTime;
-//     gettimeofday(&currentTime, NULL);
-//     struct timespec finishTime;
-//     finishTime.tv_sec = currentTime.tv_sec + simulationTime;
-
-//     //random variable to decide gift types
-//     int ran1;
-//     int ran2 = 0;
-
-//     /* Queue usage example
-//        Queue *myQ = ConstructQueue(1000);
-//        Task t;
-//        t.ID = myID;
-//        t.type = 2;
-//        Enqueue(myQ, t);
-//        Task ret = Dequeue(myQ);
-//        DestructQueue(myQ);
-//    */
+    //      exit(-1);
+    //   }
 
     packageQueue = ConstructQueue(1000);
     deliveryQueue = ConstructQueue(1000);
@@ -173,7 +156,7 @@ int main(int argc,char **argv){
 //     // printf("CurrentTime : %ld\n", currentTime.tv_sec);
 //     }
 
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 4; i++) {
         int* r;
         if (pthread_join(threads[i], (void**) &r) != 0) {
             perror("Failed to join thread");
@@ -182,21 +165,15 @@ int main(int argc,char **argv){
         // free(r);
     }
     pthread_mutex_destroy(&packageMutex); 
-   
+    pthread_mutex_destroy(&deliveryMutex);
+    pthread_mutex_destroy(&taskIDMutex); 
     return 0;
 }
 
 
 
 void* ElfA(void *arg){
-    printf("HEREe\n");
-
-    
-    // simulationResult = fopen("./simulationResult.log", "w");
-
-    // pthread_mutex_lock(&packageMutex);
-    // printf("id: %d\n", packageQueue->size);
-    // pthread_mutex_unlock(&packageMutex);
+    printf("HERE -santa\n");
 
     struct timeval currentTime;
 
@@ -213,13 +190,20 @@ void* ElfA(void *arg){
             a.turnAround = currentTime.tv_sec - a.taskArrival;
 
             fprintf(simulationResult,
-            "%d             %d          %c              %d           %d         %d         %d              %c\n"
-            ,a.ID, a.giftID, a.type, a.giftType, a.requestTime, a.taskArrival, a.turnAround, 'A');
+            "%d             %d          %d              %c           %d         %d         %d              %c\n"
+            ,a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'A');
 
-
+            a.ID = taskID;
+            pthread_mutex_lock(&taskIDMutex);
+            taskID++;
+            pthread_mutex_unlock(&taskIDMutex);
+            a.type = 'D';
+            gettimeofday(&currentTime, NULL);
+            a.taskArrival = currentTime.tv_sec;
+            a.responsable = 'S';
+            Enqueue(deliveryQueue, a);
 
         }
-        
    
     }
 
@@ -246,11 +230,67 @@ void* ElfA(void *arg){
 
 void* ElfB(void *arg){
     printf("Inside of ElfB\n");
+
+    // struct timeval currentTime;
+
+    // while (keepGoing)
+    // {
+    //     while(packageQueue->size != 0)
+    //     {
+    //         pthread_mutex_lock(&packageMutex);
+    //         Task a = Dequeue(packageQueue);
+    //         pthread_mutex_unlock(&packageMutex);
+    //         printf("id: %d\n", a.ID);
+    //         pthread_sleep(1);
+    //         gettimeofday(&currentTime, NULL);
+    //         a.turnAround = currentTime.tv_sec - a.taskArrival;
+
+    //         fprintf(simulationResult,
+    //         "%d             %d          %d              %c           %d         %d         %d              %c\n"
+    //         ,a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'B');
+
+    //         a.ID = taskID;
+    //         pthread_mutex_lock(&taskIDMutex);
+    //         taskID++;
+    //         pthread_mutex_unlock(&taskIDMutex);
+    //         a.type = 'D';
+    //         gettimeofday(&currentTime, NULL);
+    //         a.taskArrival = currentTime.tv_sec;
+    //         a.responsable = 'S';
+    //         Enqueue(deliveryQueue, a);
+
+    //     }
+   
+    // }
 }
 
 // manages Santa's tasks
 void* Santa(void *arg){
+    printf("HEREe\n");
 
+    struct timeval currentTime;
+
+    while (keepGoing)
+    {
+        while(deliveryQueue->size != 0)
+        {
+            pthread_mutex_lock(&deliveryMutex);
+            Task a = Dequeue(deliveryQueue);
+            pthread_mutex_unlock(&deliveryMutex);
+            printf("id: %d\n", a.ID);
+            pthread_sleep(2);
+            gettimeofday(&currentTime, NULL);
+            a.turnAround = currentTime.tv_sec - a.taskArrival;
+            fprintf(simulationResult,
+            "%d             %d          %d              %c           %d         %d         %d              %c\n"
+            ,a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, a.responsable);
+
+        }
+
+        // while(qAQueue->size != 0) {
+        //     //handle QA
+        // }
+    }
 }
 
 // the function that controls queues and output
@@ -273,7 +313,7 @@ void* ControlThread(void *arg){
     //random variable to decide gift types
     int ran1;
     int ran2 = 0;
-    int taskID = 1;
+    // int taskID = 1;
     int giftID = 1;
 
     keepGoing = 1;
@@ -295,7 +335,9 @@ void* ControlThread(void *arg){
         // printf("Okay kid\n");
         Task t;
         t.ID = taskID;
+        pthread_mutex_lock(&taskIDMutex);
         taskID++;
+        pthread_mutex_unlock(&taskIDMutex);
         t.type = 'C';
         t.giftID = giftID;
         giftID++;
