@@ -64,8 +64,11 @@ pthread_mutex_t packageMutex;
 pthread_mutex_t deliveryMutex;
 pthread_mutex_t paintMutex;
 pthread_mutex_t assambleMutex;
+pthread_mutex_t qAMutex;
 
 int keepGoing = 1;
+
+int jobs[1000];
 
 FILE *simulationResult;
 
@@ -85,7 +88,12 @@ int main(int argc, char **argv)
         }
     }
 
-    if (pthread_mutex_init(&packageMutex, NULL) && pthread_mutex_init(&deliveryMutex, NULL) && pthread_mutex_init(&taskIDMutex, NULL))
+    if (pthread_mutex_init(&packageMutex, NULL) 
+    && pthread_mutex_init(&deliveryMutex, NULL) 
+    && pthread_mutex_init(&taskIDMutex, NULL)
+    && pthread_mutex_init(&paintMutex, NULL)
+    && pthread_mutex_init(&assambleMutex, NULL)
+    && pthread_mutex_init(&qAMutex, NULL))
     {
         printf("\nInitiliazing mutex error.\n");
         return 1;
@@ -98,6 +106,7 @@ int main(int argc, char **argv)
     deliveryQueue = ConstructQueue(1000);
     paintQueue = ConstructQueue(1000);
     assambleQueue = ConstructQueue(1000);
+    qAQueue = ConstructQueue(1000);
 
     struct thread_data data;
     data.sum = 5;
@@ -177,6 +186,8 @@ int main(int argc, char **argv)
     pthread_mutex_destroy(&taskIDMutex);
     pthread_mutex_destroy(&paintMutex);
     pthread_mutex_destroy(&assambleMutex);
+    pthread_mutex_destroy(&qAMutex);
+
     return 0;
 }
 
@@ -220,16 +231,19 @@ void *ElfA(void *arg)
         }
         pthread_mutex_unlock(&packageMutex);
 
-
         while (paintQueue->size != 0)
         {
             pthread_mutex_lock(&paintMutex);
             Task a = Dequeue(paintQueue);
+            Task *ptr = &a;
+            a.type = 'P';
             pthread_mutex_unlock(&paintMutex);
             pthread_sleep(3);
 
             gettimeofday(&currentTime, NULL);
             a.turnAround = currentTime.tv_sec - a.taskArrival;
+            
+            jobs[a.giftID]++;
 
             fprintf(simulationResult,
                     "%d             %d          %d              %c           %d         %d         %d              %c\n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'A');
@@ -244,7 +258,19 @@ void *ElfA(void *arg)
             gettimeofday(&currentTime, NULL);
             a.taskArrival = currentTime.tv_sec;
             pthread_mutex_lock(&packageMutex);
-            Enqueue(packageQueue, a);
+            printf("isQA: %d\n",ptr->isQA);
+            if(a.giftType ==2 || jobs[a.giftID] == 2)
+            {
+                printf("Gift type: %d\n",ptr->giftType);
+                Enqueue(packageQueue, a);
+                pthread_mutex_unlock(&packageMutex);
+            }
+            // else if(ptr->isQA == 1)
+            // {
+            //     printf("Helloworld2\n");
+            //     Enqueue(packageQueue, a);
+            //     pthread_mutex_unlock(&packageMutex);
+            // }
             pthread_mutex_unlock(&packageMutex);
         }
     }
@@ -272,6 +298,7 @@ void *ElfB(void *arg)
             pthread_sleep(1);
             gettimeofday(&currentTime, NULL);
             a.turnAround = currentTime.tv_sec - a.taskArrival;
+            a.type = 'C';
 
             fprintf(simulationResult,
                     "%d             %d          %d              %c           %d         %d         %d              %c\n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'B');
@@ -289,7 +316,7 @@ void *ElfB(void *arg)
             Enqueue(deliveryQueue, a);
             pthread_mutex_unlock(&deliveryMutex);
         }
-        
+
         pthread_mutex_unlock(&packageMutex);
 
         while (assambleQueue->size != 0)
@@ -298,6 +325,8 @@ void *ElfB(void *arg)
             Task a = Dequeue(assambleQueue);
             pthread_mutex_unlock(&assambleMutex);
             pthread_sleep(2);
+
+            jobs[a.giftID]++; //assemble is done
 
             gettimeofday(&currentTime, NULL);
             a.turnAround = currentTime.tv_sec - a.taskArrival;
@@ -314,9 +343,14 @@ void *ElfB(void *arg)
             a.type = 'C';
             gettimeofday(&currentTime, NULL);
             a.taskArrival = currentTime.tv_sec;
-            pthread_mutex_lock(&packageMutex);
-            Enqueue(packageQueue, a);
-            pthread_mutex_unlock(&packageMutex);
+            if (a.giftType == 3 || jobs[a.giftID] == 2) 
+            {
+                printf("Gift type: %d\n", a.giftType);
+                pthread_mutex_lock(&packageMutex);
+                Enqueue(packageQueue, a);
+                pthread_mutex_unlock(&packageMutex);
+            }
+            
         }
     }
     pthread_exit(0);
@@ -340,12 +374,34 @@ void *Santa(void *arg)
             gettimeofday(&currentTime, NULL);
             a.turnAround = currentTime.tv_sec - a.taskArrival;
             fprintf(simulationResult,
-                    "%d             %d          %d              %c           %d         %d         %d              %c\n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, a.responsable);
+                    "%d             %d          %d              %c           %d         %d         %d              %c\n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'S');
         }
 
-        // while(qAQueue->size != 0) {
-        //     //handle QA
-        // }
+        while(qAQueue->size >= 1) {
+            //handle QA
+            pthread_mutex_lock(&qAMutex);
+            Task a = Dequeue(qAQueue);
+            //Task *ptr = &a;
+            a.type = 'Q';
+            pthread_mutex_unlock(&qAMutex);
+            pthread_sleep(1);
+            gettimeofday(&currentTime, NULL);
+            a.turnAround = currentTime.tv_sec - a.taskArrival;
+
+            jobs[a.giftID]++;
+
+            fprintf(simulationResult,
+                    "%d             %d          %d              %c           %d         %d         %d              %c\n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'S');
+            //printf("isPaint: %d\n",ptr->isPainted);
+
+            if (jobs[a.giftID] == 2) //check whether painting/assemble is done
+            {
+                pthread_mutex_lock(&packageMutex);
+                printf("helloworld\n");
+                Enqueue(packageQueue,a);
+                pthread_mutex_unlock(&packageMutex);
+            }    
+        }
     }
     pthread_exit(0);
 }
@@ -353,7 +409,7 @@ void *Santa(void *arg)
 // the function that controls queues and output
 void *ControlThread(void *arg)
 {
-    printf("HEREt\n");
+    // printf("HEREt\n");
 
     // FILE *simulationResult;
     simulationResult = fopen("./simulationResult.log", "w");
@@ -361,32 +417,32 @@ void *ControlThread(void *arg)
             "TaskID     GiftID     GiftType      TaskType      RequestTime        TaskArrival     TT      Responsable\n");
     fprintf(simulationResult, "____________________________________________________________________________________________________________\n");
 
-    struct timeval currentTime;
-    gettimeofday(&currentTime, NULL);
+    struct timeval currentTimeReal;
+    gettimeofday(&currentTimeReal, NULL);
     struct timespec finishTime;
-    finishTime.tv_sec = currentTime.tv_sec + simulationTime;
+    finishTime.tv_sec = currentTimeReal.tv_sec + simulationTime;
 
     // random variable to decide gift types
     int ran1;
     int ran2 = 0;
-    // int taskID = 1;
+
     int giftID = 1;
 
     keepGoing = 1;
     // pthread_sleep(1);
     // until reach the execution time:
-    while (finishTime.tv_sec != currentTime.tv_sec)
+    while (finishTime.tv_sec != currentTimeReal.tv_sec)
     {
 
         srand(seed + ran2); // feed the seed
-        ran1 = rand() % 10;
+        ran1 = rand() % 20;
         // // printf("Rand: %d\n",ran1);
 
-        if (ran1 == 0)
+        if (ran1 == 0 || ran1 == 1) //no gift:(
         {
             printf("Bad kid! :-()\n");
         }
-        else if (ran1 == 1 || ran1 == 2 || ran1 == 3 || ran1 == 4)
+        else if (ran1 > 1 && ran1 < 9) //gift type 1
         {
             // printf("Okay kid\n");
             Task t;
@@ -398,9 +454,9 @@ void *ControlThread(void *arg)
             t.giftID = giftID;
             giftID++;
             t.giftType = 1;
-            gettimeofday(&currentTime, NULL);
-            t.requestTime = currentTime.tv_sec;
-            t.taskArrival = currentTime.tv_sec;
+            gettimeofday(&currentTimeReal, NULL);
+            t.requestTime = currentTimeReal.tv_sec;
+            t.taskArrival = currentTimeReal.tv_sec;
 
             pthread_mutex_lock(&packageMutex);
             Enqueue(packageQueue, t);
@@ -409,7 +465,7 @@ void *ControlThread(void *arg)
 
             printf("Size: %d\n", packageQueue->size);
         }
-        else if (ran1 == 5 || ran1 == 6)
+        else if (ran1 >= 9 && ran1 < 13) //gift type 2
         {
             Task t;
             t.ID = taskID;
@@ -420,14 +476,14 @@ void *ControlThread(void *arg)
             t.giftID = giftID;
             giftID++;
             t.giftType = 2;
-            gettimeofday(&currentTime, NULL);
-            t.requestTime = currentTime.tv_sec;
-            t.taskArrival = currentTime.tv_sec;
+            gettimeofday(&currentTimeReal, NULL);
+            t.requestTime = currentTimeReal.tv_sec;
+            t.taskArrival = currentTimeReal.tv_sec;
             pthread_mutex_lock(&paintMutex);
             Enqueue(paintQueue, t);
             pthread_mutex_unlock(&paintMutex);
         }
-        else if (ran1 == 7 || ran1 == 8)
+        else if (ran1 >= 13 && ran1 < 17) //gift type 3
         {
             Task t;
             t.ID = taskID;
@@ -438,12 +494,71 @@ void *ControlThread(void *arg)
             t.giftID = giftID;
             giftID++;
             t.giftType = 3;
-            gettimeofday(&currentTime, NULL);
-            t.requestTime = currentTime.tv_sec;
-            t.taskArrival = currentTime.tv_sec;
+            gettimeofday(&currentTimeReal, NULL);
+            t.requestTime = currentTimeReal.tv_sec;
+            t.taskArrival = currentTimeReal.tv_sec;
             pthread_mutex_lock(&assambleMutex);
             Enqueue(assambleQueue, t);
             pthread_mutex_unlock(&assambleMutex);
+        }
+        else if (ran1 == 18) //gift type 4
+        {
+            // printf("Gift type 4:\n");
+            Task t;
+            t.ID = taskID;
+            pthread_mutex_lock(&taskIDMutex);
+            taskID++;
+            pthread_mutex_unlock(&taskIDMutex);
+            t.giftID = giftID;
+            giftID++;
+            t.giftType = 4;
+            gettimeofday(&currentTimeReal, NULL);
+            t.requestTime = currentTimeReal.tv_sec;
+            t.taskArrival = currentTimeReal.tv_sec;
+
+            pthread_mutex_lock(&paintMutex);
+            Enqueue(paintQueue, t);
+            pthread_mutex_unlock(&paintMutex);
+            
+
+            //increment the taskID
+            t.ID = taskID;
+            pthread_mutex_lock(&taskIDMutex);
+            taskID++;
+            pthread_mutex_unlock(&taskIDMutex);
+            
+            pthread_mutex_lock(&qAMutex);
+            Enqueue(qAQueue, t);
+            pthread_mutex_unlock(&qAMutex);
+
+        }
+        else if (ran1 == 19) //gift type 5
+        {
+            Task t;
+            t.ID = taskID;
+            pthread_mutex_lock(&taskIDMutex);
+            taskID++;
+            pthread_mutex_unlock(&taskIDMutex);
+            t.giftID = giftID;
+            giftID++;
+            t.giftType = 5;
+            gettimeofday(&currentTimeReal, NULL);
+            t.requestTime = currentTimeReal.tv_sec;
+            t.taskArrival = currentTimeReal.tv_sec;
+
+            pthread_mutex_lock(&assambleMutex);
+            Enqueue(assambleQueue, t);
+            pthread_mutex_unlock(&assambleMutex);
+
+            //increment the taskID
+            t.ID = taskID;
+            pthread_mutex_lock(&taskIDMutex);
+            taskID++;
+            pthread_mutex_unlock(&taskIDMutex);
+
+            pthread_mutex_lock(&qAMutex);
+            Enqueue(qAQueue, t);
+            pthread_mutex_unlock(&qAMutex);
         }
 
         // // // your code goes here
@@ -452,7 +567,8 @@ void *ControlThread(void *arg)
 
         ran2++;
         pthread_sleep(1);
-        gettimeofday(&currentTime, NULL);
+        printf("Here3\n");
+        gettimeofday(&currentTimeReal, NULL);
         // printf("CurrentTime : %ld\n", currentTime.tv_sec);
     }
     keepGoing = 0;
