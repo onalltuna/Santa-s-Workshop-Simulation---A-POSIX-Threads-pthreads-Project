@@ -58,6 +58,10 @@ Queue *paintQueue;
 Queue *assambleQueue;
 Queue *qAQueue;
 
+//condition variable
+pthread_mutex_t qAQueueSize_mutex;
+pthread_cond_t qAQueueSize_cv;
+
 // mutexes
 pthread_mutex_t taskIDMutex;
 pthread_mutex_t packageMutex;
@@ -69,6 +73,8 @@ pthread_mutex_t qAMutex;
 int keepGoing = 1;
 
 int jobs[1000];
+
+struct timespec finishTime;
 
 FILE *simulationResult;
 
@@ -187,13 +193,14 @@ int main(int argc, char **argv)
     pthread_mutex_destroy(&paintMutex);
     pthread_mutex_destroy(&assambleMutex);
     pthread_mutex_destroy(&qAMutex);
+    pthread_mutex_destroy(&qAQueueSize_mutex);
+    pthread_cond_destroy(&qAQueueSize_cv);
 
     return 0;
 }
 
 void *ElfA(void *arg)
 {
-    printf("HERE A\n");
 
     struct timeval currentTime;
 
@@ -228,11 +235,19 @@ void *ElfA(void *arg)
             pthread_mutex_lock(&deliveryMutex);
             Enqueue(deliveryQueue, a);
             pthread_mutex_unlock(&deliveryMutex);
+
+            //checking whether the simulation time is over
+            if(currentTime.tv_sec >= finishTime.tv_sec) {
+                exit(0);
+            }
         }
         pthread_mutex_unlock(&packageMutex);
 
         while (paintQueue->size != 0)
         {
+            if(packageQueue->size != 0){
+                ElfA(NULL);
+            }
             pthread_mutex_lock(&paintMutex);
             Task a = Dequeue(paintQueue);
             Task *ptr = &a;
@@ -261,7 +276,7 @@ void *ElfA(void *arg)
             printf("isQA: %d\n",ptr->isQA);
             if(a.giftType ==2 || jobs[a.giftID] == 2)
             {
-                printf("Gift type: %d\n",ptr->giftType);
+                //printf("Gift type: %d\n",ptr->giftType);
                 Enqueue(packageQueue, a);
                 pthread_mutex_unlock(&packageMutex);
             }
@@ -272,6 +287,11 @@ void *ElfA(void *arg)
             //     pthread_mutex_unlock(&packageMutex);
             // }
             pthread_mutex_unlock(&packageMutex);
+
+            //checking whether the simulation time is over
+            if(currentTime.tv_sec >= finishTime.tv_sec) {
+                exit(0);
+            }
         }
     }
     pthread_exit(0);
@@ -315,12 +335,20 @@ void *ElfB(void *arg)
             pthread_mutex_lock(&deliveryMutex);
             Enqueue(deliveryQueue, a);
             pthread_mutex_unlock(&deliveryMutex);
+
+            //checking whether the simulation time is over
+            if(currentTime.tv_sec >= finishTime.tv_sec) {
+                exit(0);
+            }
         }
 
         pthread_mutex_unlock(&packageMutex);
 
         while (assambleQueue->size != 0)
         {
+            if(packageQueue->size != 0){
+                ElfB(NULL);
+            }
             pthread_mutex_lock(&assambleMutex);
             Task a = Dequeue(assambleQueue);
             pthread_mutex_unlock(&assambleMutex);
@@ -345,10 +373,14 @@ void *ElfB(void *arg)
             a.taskArrival = currentTime.tv_sec;
             if (a.giftType == 3 || jobs[a.giftID] == 2) 
             {
-                printf("Gift type: %d\n", a.giftType);
+                // printf("Gift type: %d\n", a.giftType);
                 pthread_mutex_lock(&packageMutex);
                 Enqueue(packageQueue, a);
                 pthread_mutex_unlock(&packageMutex);
+            }
+
+            if(currentTime.tv_sec >= finishTime.tv_sec) {
+                exit(0);
             }
             
         }
@@ -366,21 +398,36 @@ void *Santa(void *arg)
     {
         while (deliveryQueue->size >= 1)
         {
+            
+            // pthread_mutex_lock(&qAQueueSize_mutex);
+            if (qAQueue->size >= 3) {
+                printf("qAqueue size : %d\n", qAQueue->size);
+                // pthread_cond_wait(&qAQueueSize_cv, &qAQueueSize_mutex);
+                break;
+            }
+            // pthread_mutex_unlock(&qAQueueSize_mutex);
+            printf("below wait - qAqueue size : %d\n", qAQueue->size);
             pthread_mutex_lock(&deliveryMutex);
             Task a = Dequeue(deliveryQueue);
             pthread_mutex_unlock(&deliveryMutex);
-            printf("id: %d\n", a.ID);
+            printf("santa id: %d\n", a.ID);
             pthread_sleep(1);
             gettimeofday(&currentTime, NULL);
             a.turnAround = currentTime.tv_sec - a.taskArrival;
             fprintf(simulationResult,
                     "%d             %d          %d              %c           %d         %d         %d              %c\n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'S');
+            if(currentTime.tv_sec >= finishTime.tv_sec) {
+                exit(0);
+            }
         }
 
         while(qAQueue->size >= 1) {
+            
             //handle QA
             pthread_mutex_lock(&qAMutex);
+            
             Task a = Dequeue(qAQueue);
+     
             //Task *ptr = &a;
             a.type = 'Q';
             pthread_mutex_unlock(&qAMutex);
@@ -397,9 +444,19 @@ void *Santa(void *arg)
             if (jobs[a.giftID] == 2) //check whether painting/assemble is done
             {
                 pthread_mutex_lock(&packageMutex);
-                printf("helloworld\n");
+                //printf("helloworld\n");
                 Enqueue(packageQueue,a);
                 pthread_mutex_unlock(&packageMutex);
+            }
+            
+            // printf("QA queue size: %d\n", qAQueue->size);
+
+            if(deliveryQueue->size != 0){
+              Santa(NULL);
+            }
+
+            if(currentTime.tv_sec >= finishTime.tv_sec) {
+                exit(0);
             }    
         }
     }
@@ -419,7 +476,7 @@ void *ControlThread(void *arg)
 
     struct timeval currentTimeReal;
     gettimeofday(&currentTimeReal, NULL);
-    struct timespec finishTime;
+    // struct timespec finishTime;
     finishTime.tv_sec = currentTimeReal.tv_sec + simulationTime;
 
     // random variable to decide gift types
@@ -438,11 +495,11 @@ void *ControlThread(void *arg)
         ran1 = rand() % 20;
         // // printf("Rand: %d\n",ran1);
 
-        if (ran1 == 0 || ran1 == 1) //no gift:(
-        {
-            printf("Bad kid! :-()\n");
-        }
-        else if (ran1 > 1 && ran1 < 9) //gift type 1
+        // if (ran1 == 0 || ran1 == 1) //no gift:(
+        // {
+        //     printf("Bad kid! :-()\n");
+        // }
+         if (ran1 >= 0 && ran1 <= 9) //gift type 1
         {
             // printf("Okay kid\n");
             Task t;
@@ -463,9 +520,9 @@ void *ControlThread(void *arg)
             pthread_mutex_unlock(&packageMutex);
             // pthread_sleep(1);
 
-            printf("Size: %d\n", packageQueue->size);
+            // printf("Size: %d\n", packageQueue->size);
         }
-        else if (ran1 >= 9 && ran1 < 13) //gift type 2
+        else if (ran1 > 9 && ran1 <= 13) //gift type 2
         {
             Task t;
             t.ID = taskID;
@@ -483,7 +540,7 @@ void *ControlThread(void *arg)
             Enqueue(paintQueue, t);
             pthread_mutex_unlock(&paintMutex);
         }
-        else if (ran1 >= 13 && ran1 < 17) //gift type 3
+        else if (ran1 > 13 && ran1 <= 17) //gift type 3
         {
             Task t;
             t.ID = taskID;
@@ -531,6 +588,14 @@ void *ControlThread(void *arg)
             Enqueue(qAQueue, t);
             pthread_mutex_unlock(&qAMutex);
 
+            // pthread_mutex_lock(&qAQueueSize_mutex);
+            // if (qAQueue->size == 3)
+            // {
+            //     printf("QAAAsize < 3\n");
+            //     pthread_cond_signal(&qAQueueSize_cv);
+            // }
+            // pthread_mutex_unlock(&qAQueueSize_mutex);
+
         }
         else if (ran1 == 19) //gift type 5
         {
@@ -558,7 +623,16 @@ void *ControlThread(void *arg)
 
             pthread_mutex_lock(&qAMutex);
             Enqueue(qAQueue, t);
+        
             pthread_mutex_unlock(&qAMutex);
+
+            // pthread_mutex_lock(&qAQueueSize_mutex);
+            // if (qAQueue->size == 3)
+            // {
+            //     printf("QAAAsize < 3\n");
+            //     pthread_cond_signal(&qAQueueSize_cv);
+            // }
+            // pthread_mutex_unlock(&qAQueueSize_mutex);
         }
 
         // // // your code goes here
@@ -567,10 +641,10 @@ void *ControlThread(void *arg)
 
         ran2++;
         pthread_sleep(1);
-        printf("Here3\n");
         gettimeofday(&currentTimeReal, NULL);
         // printf("CurrentTime : %ld\n", currentTime.tv_sec);
     }
+    printf("QA queue size: %d\n", qAQueue->size);
     keepGoing = 0;
     pthread_exit(0);
 }
