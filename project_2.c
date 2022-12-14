@@ -58,7 +58,7 @@ Queue *paintQueue;
 Queue *assambleQueue;
 Queue *qAQueue;
 
-//condition variable
+// condition variable
 pthread_mutex_t qAQueueSize_mutex;
 pthread_cond_t qAQueueSize_cv;
 
@@ -69,11 +69,14 @@ pthread_mutex_t deliveryMutex;
 pthread_mutex_t paintMutex;
 pthread_mutex_t assambleMutex;
 pthread_mutex_t qAMutex;
+pthread_mutex_t jobsMutex;
 
 int keepGoing = 1;
 
+// to check QA and paint/assabmle tasks are completed
 int jobs[1000];
 
+struct timespec startTime;
 struct timespec finishTime;
 
 FILE *simulationResult;
@@ -94,12 +97,7 @@ int main(int argc, char **argv)
         }
     }
 
-    if (pthread_mutex_init(&packageMutex, NULL) 
-    && pthread_mutex_init(&deliveryMutex, NULL) 
-    && pthread_mutex_init(&taskIDMutex, NULL)
-    && pthread_mutex_init(&paintMutex, NULL)
-    && pthread_mutex_init(&assambleMutex, NULL)
-    && pthread_mutex_init(&qAMutex, NULL))
+    if (pthread_mutex_init(&packageMutex, NULL) && pthread_mutex_init(&deliveryMutex, NULL) && pthread_mutex_init(&taskIDMutex, NULL) && pthread_mutex_init(&paintMutex, NULL) && pthread_mutex_init(&assambleMutex, NULL) && pthread_mutex_init(&qAMutex, NULL) && pthread_mutex_init(&jobsMutex, NULL))
     {
         printf("\nInitiliazing mutex error.\n");
         return 1;
@@ -193,8 +191,9 @@ int main(int argc, char **argv)
     pthread_mutex_destroy(&paintMutex);
     pthread_mutex_destroy(&assambleMutex);
     pthread_mutex_destroy(&qAMutex);
-    pthread_mutex_destroy(&qAQueueSize_mutex);
-    pthread_cond_destroy(&qAQueueSize_cv);
+    pthread_mutex_destroy(&jobsMutex);
+    // pthread_mutex_destroy(&qAQueueSize_mutex);
+    // pthread_cond_destroy(&qAQueueSize_cv);
 
     return 0;
 }
@@ -215,13 +214,13 @@ void *ElfA(void *arg)
                 pthread_mutex_unlock(&packageMutex);
             }
             // pthread_mutex_lock(&packageMutex);
-            printf("id: %d\n", a.ID);
+            // printf("id: %d\n", a.ID);
             pthread_sleep(1);
             gettimeofday(&currentTime, NULL);
             a.turnAround = currentTime.tv_sec - a.taskArrival;
 
             fprintf(simulationResult,
-                    "%d             %d          %d              %c           %d         %d         %d              %c\n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'A');
+                    "%d             %d          %d              %c           %d         %d         %d              %c       %d\n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'A', a.isNewZeland);
 
             // deliver to santa
             a.ID = taskID;
@@ -232,12 +231,35 @@ void *ElfA(void *arg)
             gettimeofday(&currentTime, NULL);
             a.taskArrival = currentTime.tv_sec;
             a.responsable = 'S';
-            pthread_mutex_lock(&deliveryMutex);
-            Enqueue(deliveryQueue, a);
-            pthread_mutex_unlock(&deliveryMutex);
 
-            //checking whether the simulation time is over
-            if(currentTime.tv_sec >= finishTime.tv_sec) {
+            if (a.isNewZeland == 1)
+            {
+                if (deliveryQueue->size == 0)
+                {
+                    pthread_mutex_lock(&deliveryMutex);
+                    Enqueue(deliveryQueue, a);
+                    pthread_mutex_unlock(&deliveryMutex);
+                }
+                else
+                {
+                    pthread_mutex_lock(&deliveryMutex);
+                    NODE *item = (NODE *)malloc(sizeof(NODE));
+                    item->data = a;
+                    item->prev = deliveryQueue->head;
+                    deliveryQueue->head = item;
+                    pthread_mutex_unlock(&deliveryMutex);
+                }
+            }
+            else
+            {
+                pthread_mutex_lock(&deliveryMutex);
+                Enqueue(deliveryQueue, a);
+                pthread_mutex_unlock(&deliveryMutex);
+            }
+
+            // checking whether the simulation time is over
+            if (currentTime.tv_sec >= finishTime.tv_sec)
+            {
                 exit(0);
             }
         }
@@ -245,7 +267,8 @@ void *ElfA(void *arg)
 
         while (paintQueue->size != 0)
         {
-            if(packageQueue->size != 0){
+            if (packageQueue->size != 0)
+            {
                 ElfA(NULL);
             }
             pthread_mutex_lock(&paintMutex);
@@ -257,11 +280,13 @@ void *ElfA(void *arg)
 
             gettimeofday(&currentTime, NULL);
             a.turnAround = currentTime.tv_sec - a.taskArrival;
-            
+
+            pthread_mutex_lock(&jobsMutex);
             jobs[a.giftID]++;
+            pthread_mutex_unlock(&jobsMutex);
 
             fprintf(simulationResult,
-                    "%d             %d          %d              %c           %d         %d         %d              %c\n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'A');
+                    "%d             %d          %d              %c           %d         %d         %d              %c       %d\n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'A', a.isNewZeland);
 
             // deliver to package
             a.ID = taskID;
@@ -273,23 +298,39 @@ void *ElfA(void *arg)
             gettimeofday(&currentTime, NULL);
             a.taskArrival = currentTime.tv_sec;
             pthread_mutex_lock(&packageMutex);
-            printf("isQA: %d\n",ptr->isQA);
-            if(a.giftType ==2 || jobs[a.giftID] == 2)
+
+            if (a.giftType == 2 || jobs[a.giftID] == 2)
             {
-                //printf("Gift type: %d\n",ptr->giftType);
-                Enqueue(packageQueue, a);
-                pthread_mutex_unlock(&packageMutex);
+
+                if (a.isNewZeland == 1)
+                {
+                    if (packageQueue->size == 0)
+                    {
+                        Enqueue(packageQueue, a);
+                        pthread_mutex_unlock(&packageMutex);
+                    }
+                    else
+                    {
+                        // pthread_mutex_lock(&packageMutex);
+                        NODE *item = (NODE *)malloc(sizeof(NODE));
+                        item->data = a;
+                        item->prev = packageQueue->head;
+                        packageQueue->head = item;
+                        pthread_mutex_unlock(&packageMutex);
+                    }
+                }
+                else
+                {
+                    Enqueue(packageQueue, a);
+                    pthread_mutex_unlock(&packageMutex);
+                }
             }
-            // else if(ptr->isQA == 1)
-            // {
-            //     printf("Helloworld2\n");
-            //     Enqueue(packageQueue, a);
-            //     pthread_mutex_unlock(&packageMutex);
-            // }
+
             pthread_mutex_unlock(&packageMutex);
 
-            //checking whether the simulation time is over
-            if(currentTime.tv_sec >= finishTime.tv_sec) {
+            // checking whether the simulation time is over
+            if (currentTime.tv_sec >= finishTime.tv_sec)
+            {
                 exit(0);
             }
         }
@@ -299,7 +340,7 @@ void *ElfA(void *arg)
 
 void *ElfB(void *arg)
 {
-    printf("Inside of ElfB\n");
+    // printf("Inside of ElfB\n");
 
     struct timeval currentTime;
 
@@ -307,21 +348,20 @@ void *ElfB(void *arg)
     {
         pthread_mutex_lock(&packageMutex);
         while (packageQueue->size != 0)
-
         {
             Task a = Dequeue(packageQueue);
             if (packageQueue->size > 0)
             {
                 pthread_mutex_unlock(&packageMutex);
             }
-            printf("id: %d\n", a.ID);
+            // printf("id: %d\n", a.ID);
             pthread_sleep(1);
             gettimeofday(&currentTime, NULL);
             a.turnAround = currentTime.tv_sec - a.taskArrival;
             a.type = 'C';
 
             fprintf(simulationResult,
-                    "%d             %d          %d              %c           %d         %d         %d              %c\n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'B');
+                    "%d             %d          %d              %c           %d         %d         %d              %c       %d\n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'B', a.isNewZeland);
 
             // deliver to santa
             a.ID = taskID;
@@ -332,12 +372,35 @@ void *ElfB(void *arg)
             gettimeofday(&currentTime, NULL);
             a.taskArrival = currentTime.tv_sec;
             a.responsable = 'S';
-            pthread_mutex_lock(&deliveryMutex);
-            Enqueue(deliveryQueue, a);
-            pthread_mutex_unlock(&deliveryMutex);
 
-            //checking whether the simulation time is over
-            if(currentTime.tv_sec >= finishTime.tv_sec) {
+            if (a.isNewZeland == 1)
+            {
+                if (deliveryQueue->size == 0)
+                {
+                    pthread_mutex_lock(&deliveryMutex);
+                    Enqueue(deliveryQueue, a);
+                    pthread_mutex_unlock(&deliveryMutex);
+                }
+                else
+                {
+                    pthread_mutex_lock(&deliveryMutex);
+                    NODE *item = (NODE *)malloc(sizeof(NODE));
+                    item->data = a;
+                    item->prev = deliveryQueue->head;
+                    deliveryQueue->head = item;
+                    pthread_mutex_unlock(&deliveryMutex);
+                }
+            }
+            else
+            {
+                pthread_mutex_lock(&deliveryMutex);
+                Enqueue(deliveryQueue, a);
+                pthread_mutex_unlock(&deliveryMutex);
+            }
+
+            // checking whether the simulation time is over
+            if (currentTime.tv_sec >= finishTime.tv_sec)
+            {
                 exit(0);
             }
         }
@@ -346,7 +409,8 @@ void *ElfB(void *arg)
 
         while (assambleQueue->size != 0)
         {
-            if(packageQueue->size != 0){
+            if (packageQueue->size != 0)
+            {
                 ElfB(NULL);
             }
             pthread_mutex_lock(&assambleMutex);
@@ -354,13 +418,15 @@ void *ElfB(void *arg)
             pthread_mutex_unlock(&assambleMutex);
             pthread_sleep(2);
 
-            jobs[a.giftID]++; //assemble is done
+            pthread_mutex_lock(&jobsMutex);
+            jobs[a.giftID]++;
+            pthread_mutex_unlock(&jobsMutex);
 
             gettimeofday(&currentTime, NULL);
             a.turnAround = currentTime.tv_sec - a.taskArrival;
 
             fprintf(simulationResult,
-                    "%d             %d          %d              %c           %d         %d         %d              %c\n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'B');
+                    "%d             %d          %d              %c           %d         %d         %d              %c       %d\n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'B', a.isNewZeland);
 
             // deliver to package
             a.ID = taskID;
@@ -371,18 +437,39 @@ void *ElfB(void *arg)
             a.type = 'C';
             gettimeofday(&currentTime, NULL);
             a.taskArrival = currentTime.tv_sec;
-            if (a.giftType == 3 || jobs[a.giftID] == 2) 
+            if (a.giftType == 3 || jobs[a.giftID] == 2)
             {
                 // printf("Gift type: %d\n", a.giftType);
-                pthread_mutex_lock(&packageMutex);
-                Enqueue(packageQueue, a);
-                pthread_mutex_unlock(&packageMutex);
+                if (a.isNewZeland == 1)
+                {
+                    if (packageQueue->size == 0)
+                    {
+                        pthread_mutex_lock(&packageMutex);
+                        Enqueue(packageQueue, a);
+                        pthread_mutex_unlock(&packageMutex);
+                    }
+                    else
+                    {
+                        pthread_mutex_lock(&packageMutex);
+                        NODE *item = (NODE *)malloc(sizeof(NODE));
+                        item->data = a;
+                        item->prev = packageQueue->head;
+                        packageQueue->head = item;
+                        pthread_mutex_unlock(&packageMutex);
+                    }
+                }
+                else
+                {
+                    pthread_mutex_lock(&packageMutex);
+                    Enqueue(packageQueue, a);
+                    pthread_mutex_unlock(&packageMutex);
+                }
             }
 
-            if(currentTime.tv_sec >= finishTime.tv_sec) {
+            if (currentTime.tv_sec >= finishTime.tv_sec)
+            {
                 exit(0);
             }
-            
         }
     }
     pthread_exit(0);
@@ -398,10 +485,11 @@ void *Santa(void *arg)
     {
         while (deliveryQueue->size >= 1)
         {
-            
+
             // pthread_mutex_lock(&qAQueueSize_mutex);
-            if (qAQueue->size >= 3) {
-                printf("qAqueue size : %d\n", qAQueue->size);
+            if (qAQueue->size >= 3)
+            {
+                // printf("qAqueue size : %d\n", qAQueue->size);
                 // pthread_cond_wait(&qAQueueSize_cv, &qAQueueSize_mutex);
                 break;
             }
@@ -410,54 +498,81 @@ void *Santa(void *arg)
             pthread_mutex_lock(&deliveryMutex);
             Task a = Dequeue(deliveryQueue);
             pthread_mutex_unlock(&deliveryMutex);
-            printf("santa id: %d\n", a.ID);
-            pthread_sleep(1);
+            // printf("santa id: %d\n", a.ID);
+            pthread_sleep(2);
             gettimeofday(&currentTime, NULL);
             a.turnAround = currentTime.tv_sec - a.taskArrival;
             fprintf(simulationResult,
-                    "%d             %d          %d              %c           %d         %d         %d              %c\n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'S');
-            if(currentTime.tv_sec >= finishTime.tv_sec) {
+                    "%d             %d          %d              %c           %d         %d         %d              %c       %d\n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'S', a.isNewZeland);
+            if (currentTime.tv_sec >= finishTime.tv_sec)
+            {
                 exit(0);
             }
         }
 
-        while(qAQueue->size >= 1) {
-            
-            //handle QA
+        while (qAQueue->size >= 1)
+        {
+
+            // handle QA
             pthread_mutex_lock(&qAMutex);
-            
+
             Task a = Dequeue(qAQueue);
-     
-            //Task *ptr = &a;
+
+            // Task *ptr = &a;
             a.type = 'Q';
             pthread_mutex_unlock(&qAMutex);
             pthread_sleep(1);
             gettimeofday(&currentTime, NULL);
             a.turnAround = currentTime.tv_sec - a.taskArrival;
 
+            pthread_mutex_lock(&jobsMutex);
             jobs[a.giftID]++;
+            pthread_mutex_unlock(&jobsMutex);
 
             fprintf(simulationResult,
-                    "%d             %d          %d              %c           %d         %d         %d              %c\n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'S');
-            //printf("isPaint: %d\n",ptr->isPainted);
+                    "%d             %d          %d              %c           %d         %d         %d              %c       %d\n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'S', a.isNewZeland);
+            // printf("isPaint: %d\n",ptr->isPainted);
 
-            if (jobs[a.giftID] == 2) //check whether painting/assemble is done
+            if (jobs[a.giftID] == 2) // check whether painting/assemble is done
             {
-                pthread_mutex_lock(&packageMutex);
-                //printf("helloworld\n");
-                Enqueue(packageQueue,a);
-                pthread_mutex_unlock(&packageMutex);
+                a.taskArrival = currentTime.tv_sec;
+                if (a.isNewZeland == 1)
+                {
+                    if (packageQueue->size == 0)
+                    {
+                        pthread_mutex_lock(&packageMutex);
+                        Enqueue(packageQueue, a);
+                        pthread_mutex_unlock(&packageMutex);
+                    }
+                    else
+                    {
+                        pthread_mutex_lock(&packageMutex);
+                        NODE *item = (NODE *)malloc(sizeof(NODE));
+                        item->data = a;
+                        item->prev = packageQueue->head;
+                        packageQueue->head = item;
+                        pthread_mutex_unlock(&packageMutex);
+                    }
+                }
+                else
+                {
+                    pthread_mutex_lock(&packageMutex);
+                    Enqueue(packageQueue, a);
+                    pthread_mutex_unlock(&packageMutex);
+                }
             }
-            
+
             // printf("QA queue size: %d\n", qAQueue->size);
 
-            if(deliveryQueue->size != 0){
-              Santa(NULL);
+            if (deliveryQueue->size != 0)
+            {
+                Santa(NULL);
             }
 
-            if(currentTime.tv_sec >= finishTime.tv_sec) {
+            if (currentTime.tv_sec >= finishTime.tv_sec)
+            {
                 exit(0);
-            }    
+            }
         }
     }
     pthread_exit(0);
@@ -471,12 +586,13 @@ void *ControlThread(void *arg)
     // FILE *simulationResult;
     simulationResult = fopen("./simulationResult.log", "w");
     fprintf(simulationResult,
-            "TaskID     GiftID     GiftType      TaskType      RequestTime        TaskArrival     TT      Responsable\n");
+            "TaskID     GiftID     GiftType      TaskType      RequestTime        TaskArrival     TT      Responsable       NewZeland\n");
     fprintf(simulationResult, "____________________________________________________________________________________________________________\n");
 
     struct timeval currentTimeReal;
     gettimeofday(&currentTimeReal, NULL);
-    // struct timespec finishTime;
+
+    startTime.tv_sec = currentTimeReal.tv_sec;
     finishTime.tv_sec = currentTimeReal.tv_sec + simulationTime;
 
     // random variable to decide gift types
@@ -488,20 +604,15 @@ void *ControlThread(void *arg)
     keepGoing = 1;
     // pthread_sleep(1);
     // until reach the execution time:
+    int count = 0;
     while (finishTime.tv_sec != currentTimeReal.tv_sec)
     {
 
         srand(seed + ran2); // feed the seed
         ran1 = rand() % 20;
-        // // printf("Rand: %d\n",ran1);
 
-        // if (ran1 == 0 || ran1 == 1) //no gift:(
-        // {
-        //     printf("Bad kid! :-()\n");
-        // }
-         if (ran1 >= 0 && ran1 <= 9) //gift type 1
+        if (ran1 >= 0 && ran1 <= 9) // gift type 1
         {
-            // printf("Okay kid\n");
             Task t;
             t.ID = taskID;
             pthread_mutex_lock(&taskIDMutex);
@@ -515,14 +626,35 @@ void *ControlThread(void *arg)
             t.requestTime = currentTimeReal.tv_sec;
             t.taskArrival = currentTimeReal.tv_sec;
 
-            pthread_mutex_lock(&packageMutex);
-            Enqueue(packageQueue, t);
-            pthread_mutex_unlock(&packageMutex);
-            // pthread_sleep(1);
+            if ((t.requestTime - startTime.tv_sec) % 30 == 0 && startTime.tv_sec != currentTimeReal.tv_sec)
+            {
+                // printf("t.requestTime - startTime.tv_sec: %ld\n", t.requestTime - startTime.tv_sec);
+                t.isNewZeland = 1;
 
-            // printf("Size: %d\n", packageQueue->size);
+                if (packageQueue->size == 0)
+                {
+                    pthread_mutex_lock(&packageMutex);
+                    Enqueue(packageQueue, t);
+                    pthread_mutex_unlock(&packageMutex);
+                }
+                else
+                {
+                    pthread_mutex_lock(&packageMutex);
+                    NODE *item = (NODE *)malloc(sizeof(NODE));
+                    item->data = t;
+                    item->prev = packageQueue->head;
+                    packageQueue->head = item;
+                    pthread_mutex_unlock(&packageMutex);
+                }
+            }
+            else
+            {
+                pthread_mutex_lock(&packageMutex);
+                Enqueue(packageQueue, t);
+                pthread_mutex_unlock(&packageMutex);
+            }
         }
-        else if (ran1 > 9 && ran1 <= 13) //gift type 2
+        else if (ran1 > 9 && ran1 <= 13) // gift type 2
         {
             Task t;
             t.ID = taskID;
@@ -536,11 +668,38 @@ void *ControlThread(void *arg)
             gettimeofday(&currentTimeReal, NULL);
             t.requestTime = currentTimeReal.tv_sec;
             t.taskArrival = currentTimeReal.tv_sec;
-            pthread_mutex_lock(&paintMutex);
-            Enqueue(paintQueue, t);
-            pthread_mutex_unlock(&paintMutex);
+
+            if ((t.requestTime - startTime.tv_sec) % 30 == 0 && startTime.tv_sec != currentTimeReal.tv_sec)
+            {
+                printf("t.requestTime - startTime.tv_sec: %ld\n", t.requestTime - startTime.tv_sec);
+                t.isNewZeland = 1;
+
+                if (paintQueue->size == 0)
+                {
+                    pthread_mutex_lock(&paintMutex);
+                    Enqueue(paintQueue, t);
+                    pthread_mutex_unlock(&paintMutex);
+                }
+                else
+                {
+                    pthread_mutex_lock(&paintMutex);
+                    NODE *item = (NODE *)malloc(sizeof(NODE));
+                    item->data = t;
+                    item->prev = paintQueue->head;
+                    paintQueue->head = item;
+                    pthread_mutex_unlock(&paintMutex);
+                }
+                printf("Is head new zeland: %d\n", paintQueue->head->data.isNewZeland);
+            }
+            else
+            {
+                t.isNewZeland = 0;
+                pthread_mutex_lock(&paintMutex);
+                Enqueue(paintQueue, t);
+                pthread_mutex_unlock(&paintMutex);
+            }
         }
-        else if (ran1 > 13 && ran1 <= 17) //gift type 3
+        else if (ran1 > 13 && ran1 <= 17) // gift type 3
         {
             Task t;
             t.ID = taskID;
@@ -554,13 +713,39 @@ void *ControlThread(void *arg)
             gettimeofday(&currentTimeReal, NULL);
             t.requestTime = currentTimeReal.tv_sec;
             t.taskArrival = currentTimeReal.tv_sec;
-            pthread_mutex_lock(&assambleMutex);
-            Enqueue(assambleQueue, t);
-            pthread_mutex_unlock(&assambleMutex);
+
+            if ((t.requestTime - startTime.tv_sec) % 30 == 0 && startTime.tv_sec != currentTimeReal.tv_sec)
+            {
+                printf("t.requestTime - startTime.tv_sec: %ld\n", t.requestTime - startTime.tv_sec);
+                t.isNewZeland = 1;
+
+                if (assambleQueue->size == 0)
+                {
+                    pthread_mutex_lock(&assambleMutex);
+                    Enqueue(assambleQueue, t);
+                    pthread_mutex_unlock(&assambleMutex);
+                }
+                else
+                {
+                    pthread_mutex_lock(&assambleMutex);
+                    NODE *item = (NODE *)malloc(sizeof(NODE));
+                    item->data = t;
+                    item->prev = assambleQueue->head;
+                    assambleQueue->head = item;
+                    pthread_mutex_unlock(&assambleMutex);
+                }
+                printf("Is head new zeland: %d\n", assambleQueue->head->data.isNewZeland);
+            }
+            else
+            {
+                t.isNewZeland = 0;
+                pthread_mutex_lock(&assambleMutex);
+                Enqueue(assambleQueue, t);
+                pthread_mutex_unlock(&assambleMutex);
+            }
         }
-        else if (ran1 == 18) //gift type 4
+        else if (ran1 == 18) // gift type 4
         {
-            // printf("Gift type 4:\n");
             Task t;
             t.ID = taskID;
             pthread_mutex_lock(&taskIDMutex);
@@ -573,31 +758,69 @@ void *ControlThread(void *arg)
             t.requestTime = currentTimeReal.tv_sec;
             t.taskArrival = currentTimeReal.tv_sec;
 
-            pthread_mutex_lock(&paintMutex);
-            Enqueue(paintQueue, t);
-            pthread_mutex_unlock(&paintMutex);
-            
+            if ((t.requestTime - startTime.tv_sec) % 30 == 0 && startTime.tv_sec != currentTimeReal.tv_sec)
+            {
+                printf("t.requestTime - startTime.tv_sec: %ld\n", t.requestTime - startTime.tv_sec);
+                t.isNewZeland = 1;
+                //----------------paint
+                if (paintQueue->size == 0)
+                {
+                    pthread_mutex_lock(&paintMutex);
+                    Enqueue(paintQueue, t);
+                    pthread_mutex_unlock(&paintMutex);
+                }
+                else
+                {
+                    pthread_mutex_lock(&paintMutex);
+                    NODE *item = (NODE *)malloc(sizeof(NODE));
+                    item->data = t;
+                    item->prev = paintQueue->head;
+                    paintQueue->head = item;
+                    pthread_mutex_unlock(&paintMutex);
+                }
+                // increment the taskID
+                t.ID = taskID;
+                pthread_mutex_lock(&taskIDMutex);
+                taskID++;
+                pthread_mutex_unlock(&taskIDMutex);
 
-            //increment the taskID
-            t.ID = taskID;
-            pthread_mutex_lock(&taskIDMutex);
-            taskID++;
-            pthread_mutex_unlock(&taskIDMutex);
-            
-            pthread_mutex_lock(&qAMutex);
-            Enqueue(qAQueue, t);
-            pthread_mutex_unlock(&qAMutex);
+                //-----------------QA
 
-            // pthread_mutex_lock(&qAQueueSize_mutex);
-            // if (qAQueue->size == 3)
-            // {
-            //     printf("QAAAsize < 3\n");
-            //     pthread_cond_signal(&qAQueueSize_cv);
-            // }
-            // pthread_mutex_unlock(&qAQueueSize_mutex);
+                if (qAQueue->size == 0)
+                {
+                    pthread_mutex_lock(&qAMutex);
+                    Enqueue(qAQueue, t);
+                    pthread_mutex_unlock(&qAMutex);
+                }
+                else
+                {
+                    pthread_mutex_lock(&qAMutex);
+                    NODE *item = (NODE *)malloc(sizeof(NODE));
+                    item->data = t;
+                    item->prev = qAQueue->head;
+                    qAQueue->head = item;
+                    pthread_mutex_unlock(&qAMutex);
+                }
+            }
+            else
+            {
+                t.isNewZeland = 0;
+                pthread_mutex_lock(&paintMutex);
+                Enqueue(paintQueue, t);
+                pthread_mutex_unlock(&paintMutex);
 
+                // increment the taskID
+                t.ID = taskID;
+                pthread_mutex_lock(&taskIDMutex);
+                taskID++;
+                pthread_mutex_unlock(&taskIDMutex);
+
+                pthread_mutex_lock(&qAMutex);
+                Enqueue(qAQueue, t);
+                pthread_mutex_unlock(&qAMutex);
+            }
         }
-        else if (ran1 == 19) //gift type 5
+        else if (ran1 == 19) // gift type 5
         {
             Task t;
             t.ID = taskID;
@@ -611,28 +834,67 @@ void *ControlThread(void *arg)
             t.requestTime = currentTimeReal.tv_sec;
             t.taskArrival = currentTimeReal.tv_sec;
 
-            pthread_mutex_lock(&assambleMutex);
-            Enqueue(assambleQueue, t);
-            pthread_mutex_unlock(&assambleMutex);
+            if ((t.requestTime - startTime.tv_sec) % 30 == 0 && startTime.tv_sec != currentTimeReal.tv_sec)
+            {
+                printf("t.requestTime - startTime.tv_sec: %ld\n", t.requestTime - startTime.tv_sec);
+                t.isNewZeland = 1;
+                //----------------paint
+                if (assambleQueue->size == 0)
+                {
+                    pthread_mutex_lock(&assambleMutex);
+                    Enqueue(assambleQueue, t);
+                    pthread_mutex_unlock(&assambleMutex);
+                }
+                else
+                {
+                    pthread_mutex_lock(&assambleMutex);
+                    NODE *item = (NODE *)malloc(sizeof(NODE));
+                    item->data = t;
+                    item->prev = assambleQueue->head;
+                    assambleQueue->head = item;
+                    pthread_mutex_unlock(&assambleMutex);
+                }
+                // increment the taskID
+                t.ID = taskID;
+                pthread_mutex_lock(&taskIDMutex);
+                taskID++;
+                pthread_mutex_unlock(&taskIDMutex);
 
-            //increment the taskID
-            t.ID = taskID;
-            pthread_mutex_lock(&taskIDMutex);
-            taskID++;
-            pthread_mutex_unlock(&taskIDMutex);
+                //-----------------QA
 
-            pthread_mutex_lock(&qAMutex);
-            Enqueue(qAQueue, t);
-        
-            pthread_mutex_unlock(&qAMutex);
+                if (qAQueue->size == 0)
+                {
+                    pthread_mutex_lock(&qAMutex);
+                    Enqueue(qAQueue, t);
+                    pthread_mutex_unlock(&qAMutex);
+                }
+                else
+                {
+                    pthread_mutex_lock(&qAMutex);
+                    NODE *item = (NODE *)malloc(sizeof(NODE));
+                    item->data = t;
+                    item->prev = qAQueue->head;
+                    qAQueue->head = item;
+                    pthread_mutex_unlock(&qAMutex);
+                }
+            }
+            else
+            {
+                t.isNewZeland = 0;
+                pthread_mutex_lock(&assambleMutex);
+                Enqueue(assambleQueue, t);
+                pthread_mutex_unlock(&assambleMutex);
 
-            // pthread_mutex_lock(&qAQueueSize_mutex);
-            // if (qAQueue->size == 3)
-            // {
-            //     printf("QAAAsize < 3\n");
-            //     pthread_cond_signal(&qAQueueSize_cv);
-            // }
-            // pthread_mutex_unlock(&qAQueueSize_mutex);
+                // increment the taskID
+                t.ID = taskID;
+                pthread_mutex_lock(&taskIDMutex);
+                taskID++;
+                pthread_mutex_unlock(&taskIDMutex);
+
+                pthread_mutex_lock(&qAMutex);
+                Enqueue(qAQueue, t);
+                pthread_mutex_unlock(&qAMutex);
+            }
         }
 
         // // // your code goes here
@@ -642,7 +904,9 @@ void *ControlThread(void *arg)
         ran2++;
         pthread_sleep(1);
         gettimeofday(&currentTimeReal, NULL);
-        // printf("CurrentTime : %ld\n", currentTime.tv_sec);
+        printf("CurrentTime : %ld\n", currentTimeReal.tv_sec);
+        count++;
+        printf("count %d\n", count);
     }
     printf("QA queue size: %d\n", qAQueue->size);
     keepGoing = 0;
