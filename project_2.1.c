@@ -176,6 +176,7 @@ void *ElfA(void *arg)
             pthread_sleep(1);
             gettimeofday(&currentTime, NULL);
             a.turnAround = currentTime.tv_sec - a.taskArrival;
+            a.type = 'C';
 
             fprintf(simulationResult,
                     "%d             %d          %d              %c           %d         %d         %d              %c\n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'A');
@@ -369,6 +370,7 @@ void *Santa(void *arg)
             pthread_sleep(1);
             gettimeofday(&currentTime, NULL);
             a.turnAround = currentTime.tv_sec - a.taskArrival;
+            a.type = 'D';
             fprintf(simulationResult,
                     "%d             %d          %d              %c           %d         %d         %d              %c\n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'S');
             if(currentTime.tv_sec >= finishTime.tv_sec) {

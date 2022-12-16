@@ -168,6 +168,7 @@ void *ElfA(void *arg)
             pthread_sleep(1);
             gettimeofday(&currentTime, NULL);
             a.turnAround = currentTime.tv_sec - a.taskArrival;
+            a.type = 'C';
 
             fprintf(simulationResult,
                     "%d             %d          %d              %c           %d         %d         %d              %c       \n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'A');
@@ -197,6 +198,7 @@ void *ElfA(void *arg)
                     item->data = a;
                     item->prev = deliveryQueue->head;
                     deliveryQueue->head = item;
+                    deliveryQueue->size++;
                     pthread_mutex_unlock(&deliveryMutex);
                 }
             }
@@ -266,6 +268,7 @@ void *ElfA(void *arg)
                         item->data = a;
                         item->prev = packageQueue->head;
                         packageQueue->head = item;
+                        packageQueue->size++;
                         pthread_mutex_unlock(&packageMutex);
                     }
                 }
@@ -340,6 +343,7 @@ void *ElfB(void *arg)
                     item->data = a;
                     item->prev = deliveryQueue->head;
                     deliveryQueue->head = item;
+                    deliveryQueue->size++;
                     pthread_mutex_unlock(&deliveryMutex);
                 }
             }
@@ -407,6 +411,7 @@ void *ElfB(void *arg)
                         item->data = a;
                         item->prev = packageQueue->head;
                         packageQueue->head = item;
+                        packageQueue->size++;
                         pthread_mutex_unlock(&packageMutex);
                     }
                 }
@@ -454,6 +459,7 @@ void *Santa(void *arg)
             pthread_sleep(2);
             gettimeofday(&currentTime, NULL);
             a.turnAround = currentTime.tv_sec - a.taskArrival;
+            a.type = 'D';
             fprintf(simulationResult,
                     "%d             %d          %d              %c           %d         %d         %d              %c       \n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'S');
             if (currentTime.tv_sec >= finishTime.tv_sec)
@@ -503,6 +509,7 @@ void *Santa(void *arg)
                         item->data = a;
                         item->prev = packageQueue->head;
                         packageQueue->head = item;
+                        packageQueue->size++;
                         pthread_mutex_unlock(&packageMutex);
                     }
                 }
@@ -596,6 +603,7 @@ void *ControlThread(void *arg)
                     item->data = t;
                     item->prev = packageQueue->head;
                     packageQueue->head = item;
+                    packageQueue->size++;
                     pthread_mutex_unlock(&packageMutex);
                 }
             }
@@ -639,6 +647,7 @@ void *ControlThread(void *arg)
                     item->data = t;
                     item->prev = paintQueue->head;
                     paintQueue->head = item;
+                    paintQueue->size++;
                     pthread_mutex_unlock(&paintMutex);
                 }
                 // printf("Is head new zeland: %d\n", paintQueue->head->data.isNewZeland);
@@ -684,6 +693,7 @@ void *ControlThread(void *arg)
                     item->data = t;
                     item->prev = assambleQueue->head;
                     assambleQueue->head = item;
+                    assambleQueue->size++;
                     pthread_mutex_unlock(&assambleMutex);
                 }
                 printf("Is head new zeland: %d\n", assambleQueue->head->data.isNewZeland);
@@ -728,6 +738,7 @@ void *ControlThread(void *arg)
                     item->data = t;
                     item->prev = paintQueue->head;
                     paintQueue->head = item;
+                    paintQueue->size++;
                     pthread_mutex_unlock(&paintMutex);
                 }
                 // increment the taskID
@@ -751,6 +762,7 @@ void *ControlThread(void *arg)
                     item->data = t;
                     item->prev = qAQueue->head;
                     qAQueue->head = item;
+                    qAQueue->size++;
                     pthread_mutex_unlock(&qAMutex);
                 }
             }
@@ -804,6 +816,7 @@ void *ControlThread(void *arg)
                     item->data = t;
                     item->prev = assambleQueue->head;
                     assambleQueue->head = item;
+                    assambleQueue->size++;
                     pthread_mutex_unlock(&assambleMutex);
                 }
                 // increment the taskID
@@ -827,6 +840,7 @@ void *ControlThread(void *arg)
                     item->data = t;
                     item->prev = qAQueue->head;
                     qAQueue->head = item;
+                    qAQueue->size ++;
                     pthread_mutex_unlock(&qAMutex);
                 }
             }
