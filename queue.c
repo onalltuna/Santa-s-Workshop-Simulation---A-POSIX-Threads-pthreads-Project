@@ -13,7 +13,12 @@ typedef struct {
     int requestTime;
     int taskArrival;
     int turnAround;
+    int isNewZeland;
+
     char responsable;
+    // int isPainted;
+    // int isAssambled;
+    // int isQA;
 
 } Task;
 

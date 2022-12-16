@@ -69,6 +69,7 @@ pthread_mutex_t deliveryMutex;
 pthread_mutex_t paintMutex;
 pthread_mutex_t assambleMutex;
 pthread_mutex_t qAMutex;
+pthread_mutex_t jobsMutex;
 
 int keepGoing = 1;
 
@@ -101,7 +102,8 @@ int main(int argc, char **argv)
     && pthread_mutex_init(&taskIDMutex, NULL)
     && pthread_mutex_init(&paintMutex, NULL)
     && pthread_mutex_init(&assambleMutex, NULL)
-    && pthread_mutex_init(&qAMutex, NULL))
+    && pthread_mutex_init(&qAMutex, NULL)
+    && pthread_mutex_init(&jobsMutex, NULL))
     {
         printf("\nInitiliazing mutex error.\n");
         return 1;
@@ -145,7 +147,9 @@ int main(int argc, char **argv)
     pthread_mutex_destroy(&assambleMutex);
     pthread_mutex_destroy(&qAMutex);
     pthread_mutex_destroy(&qAQueueSize_mutex);
+    pthread_mutex_destroy(&jobsMutex);
     pthread_cond_destroy(&qAQueueSize_cv);
+    
 
     return 0;
 }
@@ -157,16 +161,18 @@ void *ElfA(void *arg)
 
     while (keepGoing)
     {
-        pthread_mutex_lock(&packageMutex);
         while (packageQueue->size != 0)
         {
-            Task a = Dequeue(packageQueue);
-            if (packageQueue->size > 0)
+            Task a;
+            pthread_mutex_lock(&packageMutex);
+            if (packageQueue->size != 0)
             {
-                pthread_mutex_unlock(&packageMutex);
+                a = Dequeue(packageQueue);
+                // break;
             }
+            pthread_mutex_unlock(&packageMutex);
             // pthread_mutex_lock(&packageMutex);
-            printf("id: %d\n", a.ID);
+            // printf("id: %d\n", a.ID);
             pthread_sleep(1);
             gettimeofday(&currentTime, NULL);
             a.turnAround = currentTime.tv_sec - a.taskArrival;
@@ -192,7 +198,7 @@ void *ElfA(void *arg)
                 exit(0);
             }
         }
-        pthread_mutex_unlock(&packageMutex);
+        // pthread_mutex_unlock(&packageMutex);
 
         while (paintQueue->size != 0)
         {
@@ -209,7 +215,9 @@ void *ElfA(void *arg)
             gettimeofday(&currentTime, NULL);
             a.turnAround = currentTime.tv_sec - a.taskArrival;
             
+            pthread_mutex_lock(&jobsMutex);
             jobs[a.giftID]++;
+            pthread_mutex_unlock(&jobsMutex);
 
             fprintf(simulationResult,
                     "%d             %d          %d              %c           %d         %d         %d              %c\n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'A');
@@ -249,22 +257,24 @@ void *ElfA(void *arg)
 
 void *ElfB(void *arg)
 {
-    printf("Inside of ElfB\n");
+    // printf("Inside of ElfB\n");
 
     struct timeval currentTime;
 
     while (keepGoing)
     {
-        pthread_mutex_lock(&packageMutex);
         while (packageQueue->size != 0)
 
         {
-            Task a = Dequeue(packageQueue);
-            if (packageQueue->size > 0)
+            Task a;
+            pthread_mutex_lock(&packageMutex);
+            if (packageQueue->size != 0)
             {
-                pthread_mutex_unlock(&packageMutex);
+                a = Dequeue(packageQueue);
+                // break;
             }
-            printf("id: %d\n", a.ID);
+            pthread_mutex_unlock(&packageMutex);
+            // printf("id: %d\n", a.ID);
             pthread_sleep(1);
             gettimeofday(&currentTime, NULL);
             a.turnAround = currentTime.tv_sec - a.taskArrival;
@@ -292,7 +302,7 @@ void *ElfB(void *arg)
             }
         }
 
-        pthread_mutex_unlock(&packageMutex);
+        // pthread_mutex_unlock(&packageMutex);
 
         while (assambleQueue->size != 0)
         {
@@ -304,7 +314,10 @@ void *ElfB(void *arg)
             pthread_mutex_unlock(&assambleMutex);
             pthread_sleep(2);
 
-            jobs[a.giftID]++; //assemble is done
+            // assemble is done
+            pthread_mutex_lock(&jobsMutex);
+            jobs[a.giftID]++;
+            pthread_mutex_unlock(&jobsMutex);
 
             gettimeofday(&currentTime, NULL);
             a.turnAround = currentTime.tv_sec - a.taskArrival;
@@ -352,7 +365,7 @@ void *Santa(void *arg)
             pthread_mutex_lock(&deliveryMutex);
             Task a = Dequeue(deliveryQueue);
             pthread_mutex_unlock(&deliveryMutex);
-            printf("santa id: %d\n", a.ID);
+            // printf("santa id: %d\n", a.ID);
             pthread_sleep(1);
             gettimeofday(&currentTime, NULL);
             a.turnAround = currentTime.tv_sec - a.taskArrival;
@@ -377,7 +390,9 @@ void *Santa(void *arg)
             gettimeofday(&currentTime, NULL);
             a.turnAround = currentTime.tv_sec - a.taskArrival;
 
+            pthread_mutex_lock(&jobsMutex);
             jobs[a.giftID]++;
+            pthread_mutex_unlock(&jobsMutex);
 
             fprintf(simulationResult,
                     "%d             %d          %d              %c           %d         %d         %d              %c\n", a.ID, a.giftID, a.giftType, a.type, a.requestTime, a.taskArrival, a.turnAround, 'S');
@@ -409,7 +424,7 @@ void *ControlThread(void *arg)
     // printf("HEREt\n");
 
     // FILE *simulationResult;
-    simulationResult = fopen("./simulationResult.log", "w");
+    simulationResult = fopen("./simulationResultPart1.log", "w");
     fprintf(simulationResult,
             "TaskID     GiftID     GiftType      TaskType      RequestTime        TaskArrival     TT      Responsable\n");
     fprintf(simulationResult, "____________________________________________________________________________________________________________\n");
@@ -427,6 +442,7 @@ void *ControlThread(void *arg)
     int giftID = 1;
 
     keepGoing = 1;
+    int count = 0;
     // pthread_sleep(1);
     // until reach the execution time:
     while (finishTime.tv_sec != currentTimeReal.tv_sec)
@@ -566,6 +582,8 @@ void *ControlThread(void *arg)
         ran2++;
         pthread_sleep(1);
         gettimeofday(&currentTimeReal, NULL);
+        count++;
+        printf("count %d\n", count);
         // printf("CurrentTime : %ld\n", currentTime.tv_sec);
     }
     keepGoing = 0;
